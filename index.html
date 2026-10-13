@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f6f8fa">
   <title>毕业设计订单账本</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="ledger-query.js" defer></script>
+  <script src="ledger-analysis.js" defer></script>
   <script src="deepseek.js" defer></script>
   <script src="app.js" defer></script>
 </head>
@@ -20,7 +20,7 @@
         <button class="button button-secondary" id="exportJson" type="button">备份数据</button>
         <button class="button button-secondary" id="importButton" type="button">恢复备份</button>
         <button class="button button-secondary" id="manageMembers" type="button">成员管理</button>
-        <button class="button button-secondary" id="aiAskLedger" type="button">AI 问账本</button>
+        <button class="button button-secondary" id="aiAskLedger" type="button">AI 财务分析</button>
         <button class="button button-primary" id="addOrder" type="button">新建订单</button>
       </div>
     </header>
@@ -128,7 +128,7 @@
   </dialog>
   <dialog id="aiDialog" aria-labelledby="aiDialogTitle">
     <form id="aiQuestionForm" novalidate>
-      <div class="dialog-heading"><h2 id="aiDialogTitle">AI 问账本</h2><button class="close-button" id="closeAiDialog" type="button" aria-label="关闭 AI 问账本">×</button></div>
+      <div class="dialog-heading"><h2 id="aiDialogTitle">AI 财务分析</h2><button class="close-button" id="closeAiDialog" type="button" aria-label="关闭 AI 财务分析">×</button></div>
       <details class="ai-settings" id="aiSettings">
         <summary id="aiSettingsTitle">DeepSeek 设置</summary>
         <div class="ai-settings-body">
@@ -137,13 +137,13 @@
           <div class="ai-settings-actions"><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">获取 API Key</a><button class="button button-secondary" id="aiTestConnection" type="button">测试连接</button><button class="button button-secondary" id="aiSaveSettings" type="button">保存设置</button><button class="button button-plain" id="aiClearKey" type="button">清除密钥</button></div>
         </div>
       </details>
-      <label class="ai-field"><span>查询范围</span><select id="aiScope"><option value="current">当前年级</option><option value="all">全部年级</option></select></label>
-      <div class="ai-examples" id="aiExamples"><button type="button" data-question="这个年级赚了多少？">赚了多少</button><button type="button" data-question="哪些订单还没结清？">未结清订单</button><button type="button" data-question="各成员的费用分别是多少？">成员费用</button><button type="button" data-question="实物和论文分别有多少单？">实物与论文</button></div>
-      <label class="ai-field ai-message"><span>你的问题</span><textarea id="aiQuestion" rows="3" maxlength="2000" placeholder="例如：23级还有多少尾款没收到？微信1接的订单赚了多少？"></textarea></label>
+      <div class="ai-access-row"><strong id="aiAccess">全部年级 · 只读</strong><button class="button button-plain" id="aiNewConversation" type="button">新对话</button></div>
+      <div class="ai-examples" id="aiExamples"><button type="button" data-question="分析所有年级的账本，给我一份经营财报，包含回款、成本、利润和需要优先处理的问题。">经营财报</button><button type="button" data-question="比较各年级和各微信的订单利润、利润率和回款情况，哪些最值得关注？">收益对比</button><button type="button" data-question="分析所有未结清订单，列出待收最多的订单和接单较久的订单，建议我优先跟进哪些？">待收分析</button><button type="button" data-question="分析各成员的实物和论文费用、订单数及费用占比，检查有没有待分配任务或待拆分费用。">成员费用</button></div>
+      <label class="ai-field ai-message"><span>你的问题</span><textarea id="aiQuestion" rows="3" maxlength="2000" placeholder="例如：22级和23级哪个更赚钱？利润率低的订单有哪些？也可以继续追问。"></textarea></label>
       <p class="ai-status" id="aiStatus" role="status" aria-live="polite" hidden></p>
       <p class="form-error" id="aiError" role="alert" hidden></p>
-      <div class="dialog-actions"><button class="button button-secondary" id="aiCancel" type="button">关闭</button><button class="button button-primary" id="aiAsk" type="submit">询问账本</button></div>
-      <section class="ai-answer" id="aiAnswer" aria-label="账本查询结果" hidden></section>
+      <div class="dialog-actions"><button class="button button-secondary" id="aiCancel" type="button">关闭</button><button class="button button-primary" id="aiAsk" type="submit">发送问题</button></div>
+      <section class="ai-answer" id="aiAnswer" aria-label="财务分析对话" hidden></section>
     </form>
   </dialog>
   <input id="importFile" type="file" accept="application/json,.json" hidden>

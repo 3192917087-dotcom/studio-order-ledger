@@ -562,7 +562,7 @@ async function importJson(event) {
     }
   } catch { showToast("备份格式有误，未修改当前账本。"); }
 }
-let previousAiQuery = null;
+let aiHistory = [];
 function loadAiConfig() {
   try {
     const saved = JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || "{}");
@@ -578,9 +578,9 @@ function updateAiSettingsTitle() {
 function openAiDialog() {
   if (!currentCohort) return openCohortDialog(true);
   if (!dataReady) return showToast("请先恢复有效备份，再查询账本。");
-  $("#aiDialogTitle").textContent = "AI 问账本";
+  $("#aiDialogTitle").textContent = "AI 财务分析";
   $("#aiApiKey").value = aiConfig.apiKey; $("#aiModel").value = aiConfig.model;
-  $("#aiScope").options[0].textContent = "当前年级 · " + currentCohort;
+  $("#aiAccess").textContent = "全部年级 · " + orders.length + " 笔订单 · 只读";
   $("#aiSettings").open = !aiConfig.apiKey; $("#aiError").hidden = true; aiStatus(""); updateAiSettingsTitle();
   $("#aiDialog").showModal(); (aiConfig.apiKey ? $("#aiQuestion") : $("#aiApiKey")).focus();
 }
@@ -605,9 +605,9 @@ function clearAiKey() {
 }
 function setAiBusy(busy, mode = "query") {
   $("#aiQuestionForm").setAttribute("aria-busy", String(busy)); $("#aiQuestion").readOnly = busy;
-  for (const id of ["aiApiKey", "aiModel", "aiScope", "aiTestConnection", "aiSaveSettings", "aiClearKey", "aiAsk"]) $("#" + id).disabled = busy;
+  for (const id of ["aiApiKey", "aiModel", "aiNewConversation", "aiTestConnection", "aiSaveSettings", "aiClearKey", "aiAsk"]) $("#" + id).disabled = busy;
   $("#aiExamples").querySelectorAll("button").forEach(button => { button.disabled = busy; });
-  $("#aiAsk").textContent = busy && mode === "query" ? "正在查询…" : "询问账本";
+  $("#aiAsk").textContent = busy && mode === "query" ? "正在分析…" : "发送问题";
   $("#aiTestConnection").textContent = busy && mode === "connection" ? "正在测试…" : "测试连接";
 }
 function cancelAiRequest() { aiRequestController?.abort(); aiRequestController = null; setAiBusy(false); }
@@ -626,21 +626,54 @@ async function testAiConnection() {
     if (aiRequestController === controller) { aiRequestController = null; setAiBusy(false); }
   }
 }
-function renderAiAnswer(question, report) {
-  const answer = $("#aiAnswer"), title = document.createElement("h3");
-  title.textContent = question; title.tabIndex = -1;
-  const scope = document.createElement("p"); scope.className = "query-scope"; scope.textContent = report.title;
-  const paragraphs = report.paragraphs.map(text => { const p = document.createElement("p"); p.textContent = text; return p; });
-  answer.replaceChildren(title, scope, ...paragraphs);
-  if (report.headers.length) {
-    const wrap = document.createElement("div"); wrap.className = "query-table" + (report.headers.length > 5 ? " wide" : "");
-    const table = document.createElement("table"), head = document.createElement("thead"), headerRow = document.createElement("tr"), body = document.createElement("tbody");
-    report.headers.forEach(label => { const th = document.createElement("th"); th.scope = "col"; th.textContent = label; headerRow.append(th); });
-    head.append(headerRow);
-    report.rows.forEach(values => { const row = document.createElement("tr"); values.forEach(value => { const td = document.createElement("td"); td.textContent = value; row.append(td); }); body.append(row); });
-    table.append(head, body); wrap.append(table); answer.append(wrap);
+function appendAiInline(node, text) {
+  // Only create text, strong and code nodes. Model HTML and links remain literal text.
+  for (const part of text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g)) {
+    if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("`") && part.endsWith("`"))) {
+      const bold = part.startsWith("**"), element = document.createElement(bold ? "strong" : "code");
+      element.textContent = part.slice(bold ? 2 : 1, bold ? -2 : -1); node.append(element);
+    } else node.append(document.createTextNode(part));
   }
+}
+function renderAiBody(container, content) {
+  const lines = content.replace(/\r/g, "").split("\n"), cells = line => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(value => value.trim());
+  let list = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) { list = null; continue; }
+    if (line.includes("|") && i + 1 < lines.length && /^\|?\s*:?-{3,}/.test(lines[i + 1].trim()) && cells(lines[i + 1]).every(value => /^:?-{3,}:?$/.test(value))) {
+      list = null;
+      const wrap = document.createElement("div"), table = document.createElement("table"), head = document.createElement("thead"), body = document.createElement("tbody"), row = document.createElement("tr");
+      wrap.className = "query-table" + (cells(line).length > 4 ? " wide" : "");
+      for (const value of cells(line)) { const th = document.createElement("th"); th.scope = "col"; appendAiInline(th, value); row.append(th); }
+      head.append(row); i++;
+      while (i + 1 < lines.length && lines[i + 1].trim().includes("|")) {
+        const row = document.createElement("tr");
+        for (const value of cells(lines[++i])) { const td = document.createElement("td"); appendAiInline(td, value); row.append(td); }
+        body.append(row);
+      }
+      table.append(head, body); wrap.append(table); container.append(wrap); continue;
+    }
+    const heading = line.match(/^#{1,6}\s+(.+)/), bullet = line.match(/^(?:[-*]\s+|\d+[.)、]\s+)(.+)/);
+    if (bullet) {
+      const kind = /^\d/.test(line) ? "ol" : "ul";
+      if (!list || list.tagName.toLowerCase() !== kind) { list = document.createElement(kind); container.append(list); }
+      const item = document.createElement("li"); appendAiInline(item, bullet[1]); list.append(item);
+    } else {
+      list = null; const element = document.createElement(heading ? "h4" : "p");
+      appendAiInline(element, heading ? heading[1] : line); container.append(element);
+    }
+  }
+}
+function renderAiAnswer(question, result) {
+  const answer = $("#aiAnswer"), turn = document.createElement("article"), title = document.createElement("h3"), body = document.createElement("div");
+  turn.className = "ai-turn"; title.textContent = question; title.tabIndex = -1; body.className = "ai-report";
+  renderAiBody(body, result.answer); turn.append(title, body); answer.append(turn);
   answer.hidden = false; title.focus();
+}
+function resetAiConversation() {
+  aiHistory = []; $("#aiAnswer").replaceChildren(); $("#aiAnswer").hidden = true;
+  $("#aiQuestion").value = ""; $("#aiError").hidden = true; aiStatus(""); $("#aiQuestion").focus();
 }
 async function askLedger(event) {
   event.preventDefault(); if (aiRequestController) return;
@@ -649,16 +682,16 @@ async function askLedger(event) {
   if (question.length > 2000) { aiError("问题过长，请控制在 2000 字以内。"); return; }
   const config = saveAiSettings(false); if (!config) return;
   $("#aiSettings").open = false;
-  const context = { date: today(), cohort: currentCohort, scope: $("#aiScope").value, cohorts: COHORTS, wechats: WECHATS,
-    members: knownMembers(), previousQuery: previousAiQuery };
-  const snapshot = JSON.parse(JSON.stringify(orders));
+  const context = { date: today(), cohort: currentCohort, cohorts: COHORTS, wechats: WECHATS, members: knownMembers() };
+  const snapshot = LedgerAnalysis.createSnapshot(orders, context);
   const controller = new AbortController(); aiRequestController = controller;
-  $("#aiError").hidden = true; $("#aiAnswer").hidden = true; setAiBusy(true); aiStatus("正在查询账本…");
+  $("#aiError").hidden = true; setAiBusy(true); aiStatus("正在分析全部年级账本…");
   try {
-    const query = await LedgerAI.requestQuery(config, context, question, { signal: controller.signal });
+    const result = await LedgerAI.analyze(config, snapshot, question, { signal: controller.signal, history: aiHistory,
+      onProgress: message => { if (aiRequestController === controller && !controller.signal.aborted) aiStatus(message); } });
     if (controller.signal.aborted || !$("#aiDialog").open) return;
-    const report = LedgerQuery.runQuery(snapshot, query, context.cohort);
-    previousAiQuery = query; aiStatus(""); renderAiAnswer(question, report);
+    aiHistory.push({ question, answer: result.answer, cohort: context.cohort }); aiHistory = aiHistory.slice(-4);
+    aiStatus(""); renderAiAnswer(question, result); $("#aiQuestion").value = "";
   } catch (error) {
     if (!controller.signal.aborted && $("#aiDialog").open) { aiStatus(""); aiError(error.message); }
   } finally {
@@ -700,7 +733,7 @@ function initialize() {
   $("#closeAiDialog").addEventListener("click", () => $("#aiDialog").close()); $("#aiCancel").addEventListener("click", () => $("#aiDialog").close());
   $("#aiDialog").addEventListener("close", cancelAiRequest); $("#aiDialog").addEventListener("cancel", cancelAiRequest);
   fillSelect($("#cohortSelect"), COHORTS, "23级"); renderContentChoices([]); loadOrders(); loadPreferences(); render();
-  $("#aiScope").addEventListener("change", () => { previousAiQuery = null; $("#aiAnswer").hidden = true; });
+  $("#aiNewConversation").addEventListener("click", resetAiConversation);
   $("#aiExamples").querySelectorAll("button").forEach(button => button.addEventListener("click", () => {
     $("#aiQuestion").value = button.dataset.question; $("#aiQuestionForm").requestSubmit();
   }));

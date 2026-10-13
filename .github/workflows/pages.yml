@@ -25,15 +25,15 @@ jobs:
       - name: Check ledger
         run: |
           node --check app.js
-          node --check ledger-query.js
+          node --check ledger-analysis.js
           node --check deepseek.js
           node tests/ledger.test.cjs
-          node tests/query.test.cjs
+          node tests/analysis.test.cjs
       - uses: actions/configure-pages@v5
       - name: Prepare website
         run: |
           mkdir -p _site
-          cp index.html styles.css app.js ledger-query.js deepseek.js .nojekyll _site/
+          cp index.html styles.css app.js ledger-analysis.js deepseek.js .nojekyll _site/
           cp -R assets _site/
       - uses: actions/upload-pages-artifact@v3
         with:

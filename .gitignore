@@ -1,0 +1,9 @@
+更新备份/
+_site/
+发布包/
+*.zip
+*.log
+.env
+.env.*
+!.env.example
+

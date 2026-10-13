@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f8fa">
+  <title>毕业设计订单账本</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="ledger-query.js" defer></script>
+  <script src="deepseek.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><strong>毕业设计订单账本</strong></div>
+      <div class="header-actions">
+        <button class="cohort-switch" id="switchCohort" type="button"><span id="currentCohortLabel">选择年级</span> · 切换</button>
+        <button class="button button-secondary" id="exportCsv" type="button">导出表格</button>
+        <button class="button button-secondary" id="exportJson" type="button">备份数据</button>
+        <button class="button button-secondary" id="importButton" type="button">恢复备份</button>
+        <button class="button button-secondary" id="manageMembers" type="button">成员管理</button>
+        <button class="button button-secondary" id="aiAskLedger" type="button">AI 问账本</button>
+        <button class="button button-primary" id="addOrder" type="button">新建订单</button>
+      </div>
+    </header>
+
+    <section class="page-heading" aria-labelledby="pageTitle">
+      <div><h1 id="pageTitle">订单</h1><span id="resultText">0 笔</span></div>
+    </section>
+
+    <section class="summary" aria-label="账目汇总">
+      <div class="summary-item"><span>订单数</span><strong id="summaryCount">0</strong></div>
+      <div class="summary-item"><span>应收总额</span><strong id="summaryTotal">¥0.00</strong></div>
+      <div class="summary-item"><span>已收总额</span><strong id="summaryPaid">¥0.00</strong></div>
+      <div class="summary-item due"><span>待收款</span><strong id="summaryDue">¥0.00</strong></div>
+      <div class="summary-item"><span>成员费用总额</span><strong id="summaryMemberCost">¥0.00</strong></div>
+      <div class="summary-item profit"><span>利润总额</span><strong id="summaryProfit">¥0.00</strong></div>
+    </section>
+
+    <section class="ledger" aria-labelledby="ledgerTitle">
+      <div class="ledger-heading"><h2 id="ledgerTitle">订单明细</h2></div>
+      <div class="filters">
+        <label class="search-field"><span class="sr-only">搜索订单</span><input id="searchInput" type="search" placeholder="搜索编号、题目或成员" autocomplete="off"></label>
+        <div class="wechat-filter"><input id="wechatFilter" type="hidden"><div id="wechatFilterChoices" role="group" aria-label="按微信筛选"></div></div>
+        <label class="select-field"><span class="sr-only">按制作成员筛选</span><select id="workerFilter"><option value="">全部制作成员</option></select></label>
+        <label class="select-field"><span class="sr-only">按收款状态筛选</span><select id="paymentFilter"><option value="">全部收款状态</option><option value="due">未结清</option><option value="unpaid">未收款</option><option value="partial">部分收款</option><option value="paid">已结清</option></select></label>
+        <button class="button button-plain" id="clearFilters" type="button">清除筛选</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">编号 / 日期</th><th scope="col">项目题目</th><th scope="col">制作分配</th><th scope="col">接单微信</th><th scope="col">应收</th><th scope="col">已收</th><th scope="col">待收</th><th scope="col">成员费用</th><th scope="col">利润</th><th scope="col">状态</th><th scope="col" class="actions-head">操作</th></tr></thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+        <div class="empty-state" id="emptyState" hidden><strong>还没有订单记录</strong><p></p><button class="button button-primary" id="emptyAdd" type="button">新建订单</button></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="cohortDialog" aria-labelledby="cohortDialogTitle">
+    <form id="cohortSetupForm">
+      <div class="dialog-heading"><h2 id="cohortDialogTitle">选择当前年级</h2><button class="close-button" id="cancelCohort" type="button" aria-label="关闭">×</button></div>
+      <label class="setup-label"><span>当前年级</span><select id="cohortSelect" required></select></label>
+      <div class="dialog-actions"><button class="button button-primary" type="submit">进入账本</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="orderDialog" aria-labelledby="dialogTitle">
+    <form id="orderForm" novalidate>
+      <div class="dialog-heading"><h2 id="dialogTitle">新建订单</h2><button class="close-button" id="closeDialog" type="button" aria-label="关闭">×</button></div>
+      <div class="form-grid">
+        <fieldset class="full wechat-field"><legend>接单微信 <em>*</em></legend><div id="orderWechatChoices" class="wechat-choices"></div></fieldset>
+        <label><span>订单编号 <em>*</em></span><input name="code" required maxlength="40" autocomplete="off"></label>
+        <label><span>接单日期 <em>*</em></span><input name="date" type="date" required></label>
+        <label class="full"><span>项目题目 <em>*</em></span><input name="title" required maxlength="150" placeholder="输入或粘贴项目题目"></label>
+        <fieldset class="full choice-field"><legend>制作内容 <em>*</em></legend><div class="choice-toolbar"><div class="choice-row" id="contentChoices"></div><button class="button button-plain" id="manageOrderMembers" type="button">添加成员</button></div></fieldset>
+        <div class="full work-fields" id="physicalWorkFields" hidden><label><span>实物成员</span><select name="physicalMember"></select></label><label><span>实物成员费用（元）</span><input name="physicalCost" inputmode="decimal" autocomplete="off"></label></div>
+        <div class="full work-fields" id="paperWorkFields" hidden><label><span>论文成员</span><select name="paperMember"></select></label><label><span>论文成员费用（元）</span><input name="paperCost" inputmode="decimal" autocomplete="off"></label></div>
+        <div class="full legacy-work-fields" id="legacyWorkFields" hidden><label><span>原成员费用（待拆分）</span><input name="legacyMemberCost" inputmode="decimal" autocomplete="off"></label><button class="button button-secondary" id="clearLegacyCost" type="button">已拆分，清除原费用</button></div>
+        <fieldset class="full price-field">
+          <legend>账目金额（元）</legend>
+          <div class="amount-grid">
+            <label><span>应收金额 <em>*</em></span><input name="receivable" type="text" inputmode="decimal" required autocomplete="off"></label>
+            <label><span>已收金额（累计）</span><input name="paid" type="text" inputmode="decimal" autocomplete="off"></label>
+          </div>
+          <div class="balance-preview"><span>待收</span><strong id="balancePreview">¥0.00</strong></div>
+          <div class="amount-grid member-cost-grid">
+            <div class="profit-preview"><span>成员费用合计</span><strong id="memberCostTotal">--</strong></div>
+            <div class="profit-preview"><span>利润</span><strong id="profitPreview">¥0.00</strong></div>
+          </div>
+          <details class="price-details" id="priceDetails">
+            <summary>费用明细（选填）</summary>
+            <div class="price-grid"><label><span>定金</span><input name="deposit" type="text" inputmode="decimal"></label><label><span>尾款</span><input name="tail" type="text" inputmode="decimal"></label><label><span>额外费用</span><input name="extra" type="text" inputmode="decimal"></label></div>
+            <div class="breakdown-total"><span>明细合计 <strong id="totalPreview">¥0.00</strong></span><button class="button button-secondary" id="applyBreakdown" type="button">合计填入应收</button></div>
+          </details>
+        </fieldset>
+      </div>
+      <p class="form-error" id="formError" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="button button-secondary" id="cancelDialog" type="button">取消</button><button class="button button-primary" type="submit">保存订单</button></div>
+    </form>
+  </dialog>
+  <dialog id="membersDialog" aria-labelledby="membersDialogTitle">
+    <form id="memberForm" novalidate>
+      <div class="dialog-heading"><h2 id="membersDialogTitle">成员管理</h2><button class="close-button" id="closeMembersDialog" type="button" aria-label="关闭成员管理">×</button></div>
+      <ul id="membersList" class="members-list" aria-label="成员名单"></ul>
+      <div class="member-add-row"><label for="newMemberName"><span>新成员姓名</span><input id="newMemberName" maxlength="100" autocomplete="off"></label><button class="button button-primary" type="submit">添加成员</button></div>
+      <p class="form-error" id="memberError" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="button button-secondary" id="doneMembers" type="button">完成</button></div>
+    </form>
+  </dialog>
+  <dialog id="paymentDialog" aria-labelledby="paymentDialogTitle">
+    <form id="paymentForm" novalidate>
+      <div class="dialog-heading"><h2 id="paymentDialogTitle">收款</h2><button class="close-button" id="closePaymentDialog" type="button" aria-label="关闭收款">×</button></div>
+      <div class="payment-order"><strong id="paymentOrderCode"></strong><span id="paymentOrderTitle"></span></div>
+      <div class="payment-summary"><div><span>应收</span><strong id="paymentReceivable">¥0.00</strong></div><div><span>当前已收</span><strong id="paymentCurrentPaid">¥0.00</strong></div><div><span>当前待收</span><strong id="paymentCurrentDue">¥0.00</strong></div></div>
+      <div class="payment-tabs" role="group" aria-label="收款操作"><button type="button" id="receiptMode" aria-pressed="true">记一笔收款</button><button type="button" id="adjustmentMode" aria-pressed="false">修改累计已收</button></div>
+      <div class="amount-grid payment-fields">
+        <label><span id="paymentAmountLabel">本次到账（元）</span><input name="amount" type="text" inputmode="decimal" required autocomplete="off"></label>
+        <label><span id="paymentDateLabel">到账日期</span><input name="date" type="date" required></label>
+      </div>
+      <div class="payment-quick"><button class="button button-secondary" type="button" id="fillRemaining">填入待收金额</button></div>
+      <label class="payment-note"><span>备注（选填）</span><input name="note" maxlength="100" placeholder="例如：定金、第二笔、补款" autocomplete="off"></label>
+      <div class="payment-preview"><div><span>保存后已收</span><strong id="paymentPaidPreview">¥0.00</strong></div><div><span>保存后待收</span><strong id="paymentBalancePreview">¥0.00</strong></div></div>
+      <p class="form-error" id="paymentError" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="button button-secondary" id="cancelPaymentDialog" type="button">取消</button><button class="button button-primary" id="savePayment" type="submit">保存收款</button></div>
+      <details class="payment-history" id="paymentHistory"><summary id="paymentHistoryTitle">收款记录</summary><div id="paymentHistoryBody"></div></details>
+    </form>
+  </dialog>
+  <dialog id="aiDialog" aria-labelledby="aiDialogTitle">
+    <form id="aiQuestionForm" novalidate>
+      <div class="dialog-heading"><h2 id="aiDialogTitle">AI 问账本</h2><button class="close-button" id="closeAiDialog" type="button" aria-label="关闭 AI 问账本">×</button></div>
+      <details class="ai-settings" id="aiSettings">
+        <summary id="aiSettingsTitle">DeepSeek 设置</summary>
+        <div class="ai-settings-body">
+          <label class="ai-field"><span>API Key</span><input id="aiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 DeepSeek API Key" maxlength="512"></label>
+          <label class="ai-field"><span>模型</span><select id="aiModel"><option value="deepseek-flash">DeepSeek Flash（推荐）</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></label>
+          <div class="ai-settings-actions"><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">获取 API Key</a><button class="button button-secondary" id="aiTestConnection" type="button">测试连接</button><button class="button button-secondary" id="aiSaveSettings" type="button">保存设置</button><button class="button button-plain" id="aiClearKey" type="button">清除密钥</button></div>
+        </div>
+      </details>
+      <label class="ai-field"><span>查询范围</span><select id="aiScope"><option value="current">当前年级</option><option value="all">全部年级</option></select></label>
+      <div class="ai-examples" id="aiExamples"><button type="button" data-question="这个年级赚了多少？">赚了多少</button><button type="button" data-question="哪些订单还没结清？">未结清订单</button><button type="button" data-question="各成员的费用分别是多少？">成员费用</button><button type="button" data-question="实物和论文分别有多少单？">实物与论文</button></div>
+      <label class="ai-field ai-message"><span>你的问题</span><textarea id="aiQuestion" rows="3" maxlength="2000" placeholder="例如：23级还有多少尾款没收到？微信1接的订单赚了多少？"></textarea></label>
+      <p class="ai-status" id="aiStatus" role="status" aria-live="polite" hidden></p>
+      <p class="form-error" id="aiError" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="button button-secondary" id="aiCancel" type="button">关闭</button><button class="button button-primary" id="aiAsk" type="submit">询问账本</button></div>
+      <section class="ai-answer" id="aiAnswer" aria-label="账本查询结果" hidden></section>
+    </form>
+  </dialog>
+  <input id="importFile" type="file" accept="application/json,.json" hidden>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
